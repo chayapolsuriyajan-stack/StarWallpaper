@@ -1,0 +1,2 @@
+three.js r0.185.1 (npm 'three@0.185.1'), vendored from the official npm tarball.
+Files: build/three.module.js, build/three.core.js

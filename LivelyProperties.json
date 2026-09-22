@@ -1,0 +1,142 @@
+{
+  "speed": {
+    "type": "slider",
+    "text": "Rotation speed",
+    "help": "How fast the sky turns, from x20 to x4000 real time. The default turns once every ~5 minutes.",
+    "min": 1,
+    "max": 100,
+    "step": 1,
+    "value": 52
+  },
+  "showTrails": {
+    "type": "checkbox",
+    "text": "Star trails",
+    "value": true
+  },
+  "trailLength": {
+    "type": "slider",
+    "text": "Trail length",
+    "help": "Length of each trail, in degrees of sky rotation (360 = a full circle).",
+    "min": 5,
+    "max": 180,
+    "step": 1,
+    "value": 60
+  },
+  "trailStyle": {
+    "type": "dropdown",
+    "text": "Trail style",
+    "help": "Comet fades toward the tail. Exposure is an even arc, like a stacked long exposure.",
+    "value": 0,
+    "items": ["Comet", "Exposure"]
+  },
+  "trailBuildup": {
+    "type": "checkbox",
+    "text": "Build trails up from start",
+    "value": true
+  },
+  "showConstellations": {
+    "type": "checkbox",
+    "text": "Constellation lines",
+    "value": false
+  },
+  "constellationNames": {
+    "type": "checkbox",
+    "text": "Constellation names",
+    "value": false
+  },
+  "constellationOpacity": {
+    "type": "slider",
+    "text": "Constellation opacity",
+    "min": 5,
+    "max": 60,
+    "step": 1,
+    "value": 25
+  },
+  "starDensity": {
+    "type": "slider",
+    "text": "Faintest star (magnitude x10)",
+    "help": "Higher shows fainter stars: 40 is a city sky, 80 a remote dark site.",
+    "min": 40,
+    "max": 80,
+    "step": 1,
+    "value": 70
+  },
+  "exposure": {
+    "type": "slider",
+    "text": "Exposure",
+    "min": 20,
+    "max": 200,
+    "step": 1,
+    "value": 100
+  },
+  "latitude": {
+    "type": "slider",
+    "text": "Latitude (pole height)",
+    "help": "Your latitude in degrees north. The celestial pole sits this high above the horizon.",
+    "min": 0,
+    "max": 60,
+    "step": 1,
+    "value": 15
+  },
+  "longitude": {
+    "type": "slider",
+    "text": "Longitude",
+    "help": "Degrees east. Only decides which stars are up at the start.",
+    "min": -180,
+    "max": 180,
+    "step": 1,
+    "value": 100
+  },
+  "showMilkyWay": {
+    "type": "checkbox",
+    "text": "Milky Way glow",
+    "value": true
+  },
+  "showForeground": {
+    "type": "checkbox",
+    "text": "Mountain silhouette",
+    "value": true
+  },
+  "grain": {
+    "type": "slider",
+    "text": "Film grain",
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "value": 50
+  },
+  "mirror": {
+    "type": "checkbox",
+    "text": "Mirror composition (pole on the right)",
+    "value": false
+  },
+  "fov": {
+    "type": "slider",
+    "text": "Field of view",
+    "help": "Vertical field of view, in degrees.",
+    "min": 30,
+    "max": 90,
+    "step": 1,
+    "value": 55
+  },
+  "fpsCap": {
+    "type": "dropdown",
+    "text": "Frame rate",
+    "value": 0,
+    "items": ["30 fps", "60 fps"]
+  },
+  "renderScale": {
+    "type": "slider",
+    "text": "Render scale (%)",
+    "help": "Lower this on integrated graphics.",
+    "min": 50,
+    "max": 100,
+    "step": 5,
+    "value": 100
+  },
+  "restart": {
+    "type": "button",
+    "text": "Open the shutter again",
+    "value": "Restart exposure"
+  }
+}
