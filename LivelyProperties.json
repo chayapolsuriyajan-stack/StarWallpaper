@@ -122,8 +122,9 @@
   "fpsCap": {
     "type": "dropdown",
     "text": "Frame rate",
+    "help": "Cap the wallpaper's frame rate. High rates only help on a high-refresh monitor.",
     "value": 0,
-    "items": ["30 fps", "60 fps"]
+    "items": ["30 fps", "60 fps", "120 fps", "144 fps", "Unlimited"]
   },
   "renderScale": {
     "type": "slider",

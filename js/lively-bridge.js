@@ -28,7 +28,7 @@ export function connectLively(engine) {
       case 'grain': engine.setGrain(n / 100); break;
       case 'mirror': engine.setMirror(bool(val)); break;
       case 'fov': engine.setFov(n); break;
-      case 'fpsCap': engine.setFps(n === 1 ? 60 : 30); break;
+      case 'fpsCap': engine.setFps([30, 60, 120, 144, Infinity][n] ?? 30); break;
       case 'renderScale': engine.setRenderScale(n / 100); break;
       case 'restart': engine.restart(); break;
     }

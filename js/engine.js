@@ -113,13 +113,18 @@ export class Engine {
   }
 
   start() {
+    // Frame limiter on an accumulating deadline, so the average rate is exact
+    // even when the cap isn't a factor of the monitor's refresh (60 fps on a
+    // 144 Hz screen, say). Uncapped (Infinity) renders every vsync.
     let last = performance.now();
+    let next = last;
     const tick = (now) => {
       requestAnimationFrame(tick);
-      const elapsed = now - last;
-      if (elapsed < 1000 / this.fps - 2) return;
+      if (now < next - 0.5) return;
+      next = Math.max(now, next + 1000 / this.fps);
+      const dt = (now - last) / 1000;
       last = now;
-      this.frame(Math.min(elapsed / 1000, 0.25));
+      this.frame(Math.min(dt, 0.25));
     };
     requestAnimationFrame(tick);
   }

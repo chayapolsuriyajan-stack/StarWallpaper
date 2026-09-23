@@ -32,7 +32,7 @@ latitude and longitude. After that, time runs faster than real time.
 | Longitude | Only decides which stars are up at the start. |
 | Milky Way glow, Mountain silhouette | Scene layers. |
 | Mirror composition | Moves the pole from the left third of the frame to the right third. The landscape mirrors with it; the sky stays astronomically correct. |
-| Field of view, Frame rate, Render scale | Framing and performance. Lower the render scale on integrated graphics. |
+| Field of view, Frame rate, Render scale | Framing and performance. Frame rate caps at 30, 60, 120 or 144 fps, or runs uncapped at the monitor's refresh rate; rates above 60 only help on a high-refresh monitor. Lower the render scale on integrated graphics. |
 | Open the shutter again | Restarts the trail build-up. |
 
 ## Running explore.html
