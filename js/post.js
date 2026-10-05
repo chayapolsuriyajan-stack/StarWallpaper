@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { QUAD_VERT, SKY_FRAG, COPY_FRAG, DOWN_FRAG, UP_FRAG, COMPOSITE_FRAG } from './shaders.js';
+import { QUAD_VERT, SKY_FRAG, WEATHER_FRAG, COPY_FRAG, DOWN_FRAG, UP_FRAG, COMPOSITE_FRAG } from './shaders.js';
 
 const BLOOM_LEVELS = 5;
 
@@ -42,6 +42,28 @@ export class Post {
     };
     this.skyPass = pass(SKY_FRAG, this.skyUniforms);
 
+    // Weather: clouds, haze and fog as a premultiplied layer, blended over the
+    // scene before bloom (so a star hidden by cloud leaves no glow).
+    this.weatherUniforms = {
+      uInvVP: this.skyUniforms.uInvVP,
+      uCloud: { value: new THREE.Vector3() },
+      uWind: { value: new THREE.Vector4() },
+      uWindDir: { value: new THREE.Vector2(1, 0) },
+      uHaze: { value: 0 },
+      uFog: { value: 0 },
+      uFlash: { value: 0 },
+      uTime: { value: 0 },
+    };
+    this.weatherPass = pass(WEATHER_FRAG, this.weatherUniforms);
+    this.applyPass = pass(COPY_FRAG, { tSrc: { value: null } });
+    Object.assign(this.applyPass.material, {
+      transparent: true,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
+    });
+    this.weatherOn = false;
+
     // Background quad that lives inside the star scene, drawn first.
     this.bgQuad = pass(COPY_FRAG, { tSrc: { value: null } });
     this.bgQuad.renderOrder = 0;
@@ -63,6 +85,12 @@ export class Post {
       uFrame: { value: 0 },
       uRes: { value: new THREE.Vector2() },
       uInvVP: this.skyUniforms.uInvVP,
+      uFog: this.weatherUniforms.uFog,
+      uFlash: this.weatherUniforms.uFlash,
+      uRain: { value: 0 },
+      uSnow: { value: 0 },
+      uTime: { value: 0 },
+      uWindX: { value: 0 },
     };
     this.compositePass = pass(COMPOSITE_FRAG, this.compositeUniforms);
     this.foregroundTarget = 1;
@@ -72,6 +100,8 @@ export class Post {
   resize(w, h) {
     this.dispose();
     this.sky = target(Math.ceil(w / 4), Math.ceil(h / 4));
+    this.weather = target(Math.ceil(w / 4), Math.ceil(h / 4));
+    this.applyPass.material.uniforms.tSrc.value = this.weather.texture;
     this.scene = target(w, h);
     this.bloom = [];
     let bw = w, bh = h;
@@ -84,7 +114,7 @@ export class Post {
   }
 
   dispose() {
-    for (const t of [this.sky, this.scene, ...(this.bloom ?? [])]) t?.dispose();
+    for (const t of [this.sky, this.weather, this.scene, ...(this.bloom ?? [])]) t?.dispose();
   }
 
   runPass(mesh, rt) {
@@ -113,6 +143,15 @@ export class Post {
 
     r.setRenderTarget(this.scene);
     r.render(scene, camera);
+
+    if (this.weatherOn) {
+      this.weatherUniforms.uTime.value = time;
+      this.compositeUniforms.uTime.value = time;
+      this.runPass(this.weatherPass, this.weather);
+      r.autoClear = false;
+      this.runPass(this.applyPass, this.scene);
+      r.autoClear = true;
+    }
 
     // Bloom: downsample chain, then additive upsample back to level 1 (level 0
     // is still nearly sharp and would ghost fine lines through the mountains).

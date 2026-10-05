@@ -39,6 +39,9 @@ for (const [key, p] of Object.entries(props)) {
       p.items.forEach((it, i) => input.add(new Option(it, i)));
       input.value = p.value;
       input.oninput = () => send(key, Number(input.value));
+    } else if (p.type === 'textbox') {
+      input = Object.assign(document.createElement('input'), { type: 'text', value: p.value });
+      input.oninput = () => send(key, input.value);
     } else {
       input = Object.assign(document.createElement('input'), { type: 'range', min: p.min, max: p.max, step: p.step, value: p.value });
       input.oninput = () => { send(key, Number(input.value)); label.textContent = `${p.text}: ${input.value}`; };
@@ -51,5 +54,10 @@ for (const [key, p] of Object.entries(props)) {
 if (still) panel.classList.add('hidden');
 panel.append(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'H — hide panel' }));
 addEventListener('keydown', (e) => { if (e.key === 'h' || e.key === 'H') panel.classList.toggle('hidden'); });
+
+// ?wx=rain (clear, cirrus, partly, overcast, fog, rain, storm, snow) previews
+// a condition instead of the live weather.
+const wx = params.get('wx');
+if (wx) engine.previewWeather(wx);
 
 window.engine = engine;

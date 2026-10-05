@@ -27,7 +27,10 @@
     "text": "Trail style",
     "help": "Comet fades toward the tail. Exposure is an even arc, like a stacked long exposure.",
     "value": 0,
-    "items": ["Comet", "Exposure"]
+    "items": [
+      "Comet",
+      "Exposure"
+    ]
   },
   "trailBuildup": {
     "type": "checkbox",
@@ -124,13 +127,48 @@
     "text": "Frame rate",
     "help": "Cap the wallpaper's frame rate. High rates only help on a high-refresh monitor.",
     "value": 0,
-    "items": ["30 fps", "60 fps", "120 fps", "144 fps", "Unlimited"]
+    "items": [
+      "30 fps",
+      "60 fps",
+      "120 fps",
+      "144 fps",
+      "Unlimited"
+    ]
   },
   "renderScale": {
     "type": "slider",
     "text": "Render scale (%)",
     "help": "Lower this on integrated graphics.",
     "min": 50,
+    "max": 100,
+    "step": 5,
+    "value": 100
+  },
+  "weather": {
+    "type": "checkbox",
+    "text": "Real weather (clouds, fog, rain, snow where you are)",
+    "value": true
+  },
+  "weatherLocation": {
+    "type": "dropdown",
+    "text": "Weather location",
+    "help": "Automatic finds you from your IP address; on a VPN it can't, so it uses the city below.",
+    "value": 0,
+    "items": [
+      "Automatic (IP address; the city below on a VPN)",
+      "Always the city below"
+    ]
+  },
+  "weatherCity": {
+    "type": "textbox",
+    "text": "City for weather (e.g. Chiang Mai)",
+    "value": ""
+  },
+  "weatherIntensity": {
+    "type": "slider",
+    "text": "Weather intensity (%)",
+    "help": "Lower it to keep more stars visible on cloudy nights.",
+    "min": 0,
     "max": 100,
     "step": 5,
     "value": 100

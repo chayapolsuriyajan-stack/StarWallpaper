@@ -33,7 +33,43 @@ latitude and longitude. After that, time runs faster than real time.
 | Milky Way glow, Mountain silhouette | Scene layers. |
 | Mirror composition | Moves the pole from the left third of the frame to the right third. The landscape mirrors with it; the sky stays astronomically correct. |
 | Field of view, Frame rate, Render scale | Framing and performance. Frame rate caps at 30, 60, 120 or 144 fps, or runs uncapped at the monitor's refresh rate; rates above 60 only help on a high-refresh monitor. Lower the render scale on integrated graphics. |
+| Real weather | Shows the actual weather where you are (see below). On by default. |
+| Weather location | **Automatic** finds you from your IP address, and uses the city below when you're on a VPN. **Always the city below** never looks at your IP. |
+| City for weather | Used on a VPN, or always if you choose that. |
+| Weather intensity | Turn it down to keep more stars visible on cloudy nights. |
 | Open the shutter again | Restarts the trail build-up. |
+
+## Real weather
+
+The sky shows the weather actually happening where you are, refreshed every
+15 minutes from [Open-Meteo](https://open-meteo.com/), which is free and needs
+no account or key. There is no text on screen: the weather simply changes the
+picture.
+
+| Weather | What you see |
+| --- | --- |
+| Cloud | Three real cloud decks: low, middle and high cirrus. They drift with the real wind direction and speed, at 25× real speed for a gentle time-lapse. They hide the trails behind them, and on the town-glow side they're lit warm from below, as night clouds look in a long exposure. |
+| Humidity, fog | Haze thickens near the horizon. Low visibility turns into fog that swallows the far ridges first, then the stars. |
+| Rain, snow | Rain streaks slanted by the wind, or flakes drifting across, in front of everything. |
+| Thunderstorm | Now and then the clouds glow from inside: one soft pulse, deliberately never a strobe, since this runs on your desktop all day. |
+
+New readings blend in over about 25 seconds instead of switching abruptly.
+
+**How your location is found.** In automatic mode the wallpaper looks up your
+IP address with [ip-api.com](https://ip-api.com/), falling back to
+[ipwho.is](https://ipwho.is/). It treats the connection as a VPN or proxy,
+and ignores the IP's location, if either of these is true:
+
+- the service flags the address as a proxy, VPN or datacentre;
+- the IP's timezone doesn't match your PC's clock.
+
+On a VPN it uses the city you typed instead. With no city set, the sky stays
+clear. Only your IP address (to the IP service) and approximate coordinates
+(to Open-Meteo) leave your machine. Choose **Always the city below** to
+skip the IP lookup entirely.
+
+To preview a condition in a browser, use `explore.html?wx=clear`, `cirrus`,
+`partly`, `overcast`, `fog`, `rain`, `storm` or `snow`.
 
 ## Running explore.html
 
@@ -92,3 +128,6 @@ query strings.
 - Constellation figures: [d3-celestial](https://github.com/ofrohn/d3-celestial),
   BSD-3-Clause.
 - `vendor/three/`: Three.js r0.185.1, MIT. See `vendor/three/LICENSE`.
+- Weather data: [Open-Meteo](https://open-meteo.com/), CC BY 4.0.
+- IP location: [ip-api.com](https://ip-api.com/) (free tier, non-commercial
+  use only) and [ipwho.is](https://ipwho.is/).

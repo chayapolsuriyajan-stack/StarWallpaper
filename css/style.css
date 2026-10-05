@@ -37,7 +37,7 @@ canvas.labels {
 
 #panel.hidden { display: none; }
 #panel label { display: block; margin: 8px 0 2px; }
-#panel input[type=range], #panel select, #panel button { width: 100%; }
+#panel input[type=range], #panel select, #panel button, #panel input[type=text] { width: 100%; box-sizing: border-box; }
 #panel .row { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; }
 #panel .row label { margin: 0; }
 #panel .hint { opacity: 0.55; margin-top: 10px; }

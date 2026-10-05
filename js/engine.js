@@ -3,11 +3,17 @@ import { SkyClock, deg } from './sky.js';
 import { StarTrails } from './star-trails.js';
 import { Constellations } from './constellations.js';
 import { Post } from './post.js';
+import { Weather, CLEAR, PRESETS } from './weather.js';
 
 // Trail and head brightness, tuned against the reference photo.
 const TRAIL_GAIN = 0.12;
 const HEAD_GAIN_WITH_TRAILS = 0.9;
 const HEAD_GAIN_ALONE = 1.8;
+
+// Clouds drift at this many times real speed: a gentle time-lapse, in the
+// spirit of the sped-up sky, without turning into a blur.
+const CLOUD_TIMELAPSE = 25;
+const WEATHER_EASE_S = 25; // a new reading rolls in over this long
 
 /**
  * Shared core for wallpaper.html and explore.html. A fixed camera faces due
@@ -51,6 +57,18 @@ export class Engine {
     this.renderScale = 1;
     this.time = 0;
     this.flip = 1;
+
+    // Real weather from your location (see weather.js).
+    this.wx = { ...CLEAR };
+    this.wxTarget = { ...CLEAR };
+    this.wxSnap = true;          // the first reading appears at once
+    this.wxIntensity = 1;
+    this.wxPreview = null;       // a named preset overrides live data (explore.html?wx=)
+    this.wind = { lx: 0, lz: 0, hx: 0, hz: 0 };
+    this.flash = { next: 6, t: -1 };
+    this.weather = new Weather((p) => { this.wxTarget = { ...p }; });
+    // Lively configures it on load; start anyway if no settings ever arrive.
+    setTimeout(() => { if (!this.weather.updatedAt && this.weather.status === 'idle') this.weather.refresh(); }, 2500);
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -147,11 +165,70 @@ export class Engine {
     this.stars.headUniforms.uGain.value = HEAD_GAIN_ALONE + (HEAD_GAIN_WITH_TRAILS - HEAD_GAIN_ALONE) * mix;
     this.stars.trailMesh.visible = mix > 0.001;
 
+    this.updateWeather(dt);
     this.constellations.update(dt, this.camera, lst, u.uLat.value);
     this.post.render(this.scene, this.camera, dt, this.time);
   }
 
+  updateWeather(dt) {
+    const target = this.wxPreview ?? this.wxTarget, wx = this.wx;
+    const k = this.wxSnap ? 1 : Math.min(1, dt / WEATHER_EASE_S);
+    if (this.weather.updatedAt || this.wxPreview) this.wxSnap = false;
+    for (const key of Object.keys(CLEAR)) if (key !== 'windDir') wx[key] += (target[key] - wx[key]) * k;
+    // Wind direction eases the short way round.
+    const dd = ((target.windDir - wx.windDir + 540) % 360) - 180;
+    wx.windDir = (wx.windDir + dd * k + 360) % 360;
+
+    const I = this.wxIntensity;
+    const w = this.post.weatherUniforms, c = this.post.compositeUniforms;
+    w.uCloud.value.set(wx.cloudLow * I, wx.cloudMid * I, wx.cloudHigh * I);
+    w.uHaze.value = wx.haze * I;
+    w.uFog.value = wx.fog * I;
+    c.uRain.value = wx.rain * I;
+    c.uSnow.value = wx.snow * I;
+
+    // Clouds move toward where the wind blows (it is reported as where it
+    // comes FROM). World axes: x east, z south. Higher decks move faster.
+    const toward = (wx.windDir + 180) * deg;
+    const vx = Math.sin(toward), vz = -Math.cos(toward);
+    w.uWindDir.value.set(vx, vz);
+    const km = (Math.max(wx.windSpeed, 2) / 3600) * CLOUD_TIMELAPSE * dt;
+    this.wind.lx -= vx * km * 1.6; this.wind.lz -= vz * km * 1.6;
+    this.wind.hx -= vx * km * 3.0; this.wind.hz -= vz * km * 3.0;
+    w.uWind.value.set(this.wind.lx, this.wind.lz, this.wind.hx, this.wind.hz);
+    c.uWindX.value = Math.max(-1, Math.min(1, vx * wx.windSpeed / 30));
+
+    // Lightning: one soft glow inside the clouds every 10-40 s in a storm.
+    // Deliberately a single slow pulse, never a strobe: this runs on a
+    // desktop all day, and rapid bright flashing can trigger photosensitive
+    // reactions.
+    const f = this.flash;
+    if (wx.storm * I > 0.05 && this.time > f.next) {
+      f.t = 0;
+      f.next = this.time + 10 + Math.random() * 30 / wx.storm;
+    }
+    let flash = 0;
+    if (f.t >= 0) {
+      f.t += dt;
+      // 0.15 s rise, then a ~1 s fade.
+      flash = f.t < 0.15 ? f.t / 0.15 : Math.exp(-(f.t - 0.15) / 0.35);
+      if (f.t > 1.6) f.t = -1;
+    }
+    w.uFlash.value = flash * Math.min(1, wx.storm * I);
+
+    this.post.weatherOn = wx.cloudLow + wx.cloudMid + wx.cloudHigh + wx.haze + wx.fog + wx.rain + wx.snow > 0.002 && I > 0;
+  }
+
   // ------------------------------------------------------------- settings --
+
+  setWeather(on) { this.weather.configure({ enabled: on }); }
+  setWeatherMode(i) { this.weather.configure({ mode: i === 1 ? 'city' : 'auto' }); }
+  setWeatherCity(city) { this.weather.configure({ city: String(city ?? '') }); }
+  setWeatherIntensity(v) { this.wxIntensity = v; }
+  /** Show a named condition instead of live data (null returns to live). */
+  previewWeather(name) {
+    this.wxPreview = name ? { ...(PRESETS[name] ?? CLEAR) } : null;
+  }
 
   setSpeed(multiplier) { this.clock.speed = multiplier; }
   setTrails(on) { this.trailsOn = on; }

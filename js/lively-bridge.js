@@ -31,6 +31,10 @@ export function connectLively(engine) {
       case 'fpsCap': engine.setFps([30, 60, 120, 144, Infinity][n] ?? 30); break;
       case 'renderScale': engine.setRenderScale(n / 100); break;
       case 'restart': engine.restart(); break;
+      case 'weather': engine.setWeather(bool(val)); break;
+      case 'weatherLocation': engine.setWeatherMode(n); break;
+      case 'weatherCity': engine.setWeatherCity(val); break;
+      case 'weatherIntensity': engine.setWeatherIntensity(n / 100); break;
     }
   };
 }

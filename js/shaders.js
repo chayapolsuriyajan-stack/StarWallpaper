@@ -265,6 +265,81 @@ void main() {
 }
 `;
 
+// Real weather, as a premultiplied layer (rgb = light, a = opacity) blended
+// over the scene before bloom, so stars behind a cloud leave no glow. Three
+// cloud decks sit on flat ceilings (1.5, 4 and 9 km): a view ray meets each
+// at d.xz * height / d.y, which gives true perspective, clouds bunching up
+// toward the horizon. Night clouds are dark against the stars and lit warm
+// from below on the side of the town glow; haze and fog sit in front.
+export const WEATHER_FRAG = /* glsl */ `
+${NOISE}
+${RAY}
+uniform vec3 uCloud;    // low, mid, high deck coverage, 0..1
+uniform vec4 uWind;     // xy: low/mid drift (km), zw: high drift (km)
+uniform vec2 uWindDir;  // unit vector the wind blows toward (x east, y south)
+uniform float uHaze, uFog, uFlash, uTime;
+varying vec2 vUv;
+
+// Coverage c turns noise into cloud: more cover, lower threshold.
+float cover(float n, float c) {
+  float t = mix(0.80, 0.24, c);
+  return smoothstep(t, t + 0.17, n) * step(0.002, c);
+}
+
+void main() {
+  vec3 d = rayDir(vUv);
+  float up = max(d.y, 0.0);
+  float az = atan(d.x, -d.z); // real-world bearing, like the sky's town glow
+  // The town glow lights cloud bases from below, strongest low in the NE.
+  float town = exp(-pow((az - 0.7) / 0.6, 2.0));
+  vec3 under = vec3(0.0075, 0.0052, 0.0034) * town;
+  vec3 flash = uFlash * vec3(0.026, 0.029, 0.037); // a glow inside the cloud, not a camera flash
+
+  vec3 acc = vec3(0.0);   // light so far (front to back)
+  float T = 1.0;          // transmittance so far
+
+  // Haze and fog are nearest: a veil thickening toward the horizon.
+  float hazeA = uHaze * 0.32 * exp(-up / 0.08);
+  float fogA = uFog * (0.78 + 0.22 * exp(-up / 0.14)); // ~1 km visibility hides nearly every star
+  float veil = 1.0 - (1.0 - hazeA) * (1.0 - fogA);
+  vec3 veilCol = vec3(0.010, 0.0115, 0.0140) + under * 0.8 + flash * 0.25;
+  acc += T * veil * veilCol; T *= 1.0 - veil;
+
+  if (d.y > 0.0 && (uCloud.x + uCloud.y + uCloud.z) > 0.0) {
+    float y = max(d.y, 0.012);
+    float lowSky = exp(-up / 0.2);
+
+    // Low deck: stratocumulus, chunky, the one that hides stars.
+    float distL = 1.5 / y;
+    vec2 pL = d.xz * distL + uWind.xy;
+    float nL = fbm(vec3(pL * 0.55, uTime * 0.004));
+    float aL = mix(cover(nL, uCloud.x), uCloud.x, smoothstep(10.0, 50.0, distL)) * 0.97;
+    vec3 cL = vec3(0.0052, 0.0057, 0.0068) * (0.55 + 0.7 * nL) + under * (0.3 + 2.4 * lowSky) * (0.6 + nL)
+            + flash * (0.4 + nL);
+    acc += T * aL * cL; T *= 1.0 - aL;
+
+    // Middle deck: altocumulus, smaller puffs, a little thinner.
+    float distM = 4.0 / y;
+    vec2 pM = d.xz * distM + uWind.xy * 1.4 + 31.7;
+    float nM = fbm(vec3(pM * 0.42, uTime * 0.003 + 5.0));
+    float aM = mix(cover(nM, uCloud.y), uCloud.y, smoothstep(25.0, 130.0, distM)) * 0.85;
+    vec3 cM = vec3(0.0050, 0.0055, 0.0068) * (0.6 + 0.6 * nM) + under * (0.3 + 1.2 * lowSky) + flash * 0.6 * nM;
+    acc += T * aM * cM; T *= 1.0 - aM;
+
+    // High deck: cirrus, combed out along the wind and thin enough that
+    // the brighter stars still show through.
+    float distH = 9.0 / y;
+    vec2 pH = d.xz * distH + uWind.zw;
+    vec2 along = vec2(dot(pH, uWindDir), dot(pH, vec2(-uWindDir.y, uWindDir.x)));
+    float nH = fbm(vec3(along.x * 0.03, along.y * 0.16, 2.0));
+    float aH = mix(cover(nH, uCloud.z), uCloud.z * 0.6, smoothstep(40.0, 220.0, distH)) * 0.5;
+    vec3 cH = vec3(0.0062, 0.0072, 0.0098) * (0.7 + 0.5 * nH) + under * 0.25 + flash * 0.3;
+    acc += T * aH * cH; T *= 1.0 - aH;
+  }
+  gl_FragColor = vec4(acc, 1.0 - T);
+}
+`;
+
 export const COPY_FRAG = /* glsl */ `
 uniform sampler2D tSrc;
 varying vec2 vUv;
@@ -320,7 +395,42 @@ uniform float uFlip;     // -1 mirrors the landscape along with the camera
 uniform float uPxAng;
 uniform float uFrame;
 uniform vec2 uRes;
+// Weather in front of the landscape.
+uniform float uFog;      // 0..1, swallows the far ridges first
+uniform float uRain;     // 0..1
+uniform float uSnow;     // 0..1
+uniform float uFlash;    // lightning, 0..1
+uniform float uTime;     // real seconds
+uniform float uWindX;    // across-screen wind, -1..1 (slants rain, drifts snow)
 varying vec2 vUv;
+
+// Rain: streaks in a scrolling grid of cells, one possible drop per cell.
+// At night they only catch ambient light, so they're faint and grey.
+float rainLayer(vec2 uv, float scale, float speed, float seed, float density) {
+  vec2 p = uv * vec2(uRes.x / uRes.y, 1.0) * scale;
+  p.x += p.y * uWindX * 0.45;
+  p.y += uTime * speed;
+  vec2 cell = floor(p), f = fract(p);
+  if (hash13(vec3(cell, seed)) > density) return 0.0;
+  float x = 0.15 + 0.7 * hash13(vec3(cell, seed + 1.0));
+  float len = 0.45 + 0.4 * hash13(vec3(cell, seed + 2.0));
+  float y = fract(f.y - hash13(vec3(cell, seed + 3.0)));
+  float w = 1.3 * scale / uRes.y; // ~1.3 px wide whatever the resolution
+  return smoothstep(w, 0.0, abs(f.x - x)) * smoothstep(len, len * 0.5, y) * smoothstep(0.0, 0.08, y);
+}
+
+// Snow: soft flakes that drift and sway on the wind.
+float snowLayer(vec2 uv, float scale, float speed, float seed, float density) {
+  vec2 p = uv * vec2(uRes.x / uRes.y, 1.0) * scale;
+  p.y += uTime * speed;
+  p.x += uTime * speed * uWindX * 0.8;
+  vec2 cell = floor(p), f = fract(p);
+  if (hash13(vec3(cell, seed)) > density) return 0.0;
+  vec2 c = vec2(0.2, 0.2) + 0.6 * vec2(hash13(vec3(cell, seed + 1.0)), hash13(vec3(cell, seed + 2.0)));
+  c.x += 0.12 * sin(uTime * (0.7 + hash13(vec3(cell, seed + 4.0))) + seed);
+  float r = 0.06 + 0.05 * hash13(vec3(cell, seed + 3.0));
+  return smoothstep(r, r * 0.2, length(f - c));
+}
 
 // Distant range: rolling granite ridges with one Half-Dome-like monolith
 // (rounded back, sheer face) west of north, clear of the pole.
@@ -379,6 +489,11 @@ void main() {
     vec3 mid = base * 0.4 * (1.0 + 1.1 * exp(-(hm - alt) / 0.015)) * tex;
     vec3 near = base * 0.12 * (1.0 + 0.9 * exp(-(hn - alt) / 0.012))
               * (0.6 + 0.8 * fbm(vec3(az * 12.0, alt * 12.0, 5.0)));
+    // Fog swallows the far ridges first; lightning lights the land for an instant.
+    vec3 fogCol = vec3(0.010, 0.011, 0.013);
+    far = mix(far, fogCol, uFog * 0.92) + uFlash * vec3(0.0030, 0.0033, 0.0042);
+    mid = mix(mid, fogCol * 0.85, uFog * 0.75) + uFlash * vec3(0.0018, 0.002, 0.0025);
+    near = mix(near, fogCol * 0.6, uFog * 0.45) + uFlash * vec3(0.0009);
     col = mix(col, far, mf * uForeground);
     col = mix(col, mid, mm * uForeground);
     col = mix(col, near, mn * uForeground);
@@ -386,6 +501,21 @@ void main() {
   }
 
   col += bloom * uBloom;
+
+  // Precipitation is nearest of all, in front of the hills.
+  if (uRain > 0.001) {
+    float r = rainLayer(uv, 26.0, 9.0, 1.0, uRain * 0.5) * 1.0
+            + rainLayer(uv, 44.0, 7.0, 7.0, uRain * 0.6) * 0.6
+            + rainLayer(uv, 70.0, 5.5, 13.0, uRain * 0.7) * 0.35;
+    col += r * (vec3(0.010, 0.011, 0.013) + uFlash * vec3(0.012, 0.013, 0.016));
+  }
+  if (uSnow > 0.001) {
+    float s = snowLayer(uv, 14.0, 0.35, 3.0, uSnow * 0.45) * 1.0
+            + snowLayer(uv, 26.0, 0.25, 9.0, uSnow * 0.55) * 0.6
+            + snowLayer(uv, 44.0, 0.18, 17.0, uSnow * 0.6) * 0.35;
+    col += s * vec3(0.016, 0.017, 0.019);
+  }
+  col += uFlash * vec3(0.0012, 0.0013, 0.0017);
   col *= uExposure;
   col = aces(col);
 
