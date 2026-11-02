@@ -3,6 +3,20 @@
  * +x = east, +y = up (zenith), +z = south, so the camera faces north down -z.
  */
 
+// The real sun (sun.js): direction in this frame, how much daylight (0..1),
+// how much dusk/dawn colour (0..1), and how dark the night is (1 = full night).
+const SUN_UNIFORMS = /* glsl */ `
+uniform vec3 uSunDir;
+uniform float uDay, uTwi, uNight;
+// 1 looking toward the sun's compass bearing, 0 looking away.
+float towardSun(vec3 d) {
+  vec2 s = uSunDir.xz, v = d.xz;
+  float ls = length(s), lv = length(v);
+  if (ls < 1e-4 || lv < 1e-4) return 0.5;
+  return pow(0.5 + 0.5 * dot(s / ls, v / lv), 1.6);
+}
+`;
+
 // Equatorial (hour angle, declination) → horizontal unit vector, plus the
 // atmosphere. Shared by every layer that draws something on the sky.
 export const SKY_COMMON = /* glsl */ `
@@ -41,6 +55,7 @@ uniform vec2 uRes;
 uniform float uPxScale;
 uniform float uGain;
 uniform float uStyle;   // 0 comet, 1 exposure
+uniform float uSkyMag;  // faintest magnitude the sky still shows
 varying vec3 vColor;
 varying float vAcross;
 
@@ -75,7 +90,10 @@ void main() {
   // Arcs that swing behind the camera would otherwise collapse into a
   // straight chord across the frame; fade them out well outside the view.
   float facing = smoothstep(0.08, 0.3, -(viewMatrix * vec4(p, 0.0)).z);
-  vColor = aColor * aStar.z * uGain * slow * fade * facing * transmission(p.y) / (sigma * 2.5066);
+  // The brighter the sky (twilight, day), the fewer stars: faint ones go first.
+  float magnitude = -log(max(aStar.z, 1e-9)) / (0.4 * 0.62 * 2.302585);
+  float skyVis = smoothstep(uSkyMag + 1.5, uSkyMag, magnitude);
+  vColor = aColor * aStar.z * uGain * slow * fade * facing * skyVis * transmission(p.y) / (sigma * 2.5066);
   vAcross = side * halfW / sigma;
 }
 `;
@@ -97,6 +115,7 @@ attribute vec3 aColor;
 uniform float uPxScale;
 uniform float uGain;
 uniform float uTime;
+uniform float uSkyMag;
 varying vec3 vColor;
 varying float vSize;
 varying float vSigma;
@@ -114,7 +133,11 @@ void main() {
   float seed = aStar.x * 913.7 + aStar.y * 457.3;
   float depth = mix(0.35, 0.05, clamp(p.y * 2.5, 0.0, 1.0));
   float tw = 1.0 + depth * (0.6 * sin(uTime * 9.1 + seed) + 0.4 * sin(uTime * 14.3 + seed * 1.7));
-  vColor = aColor * aStar.z * uGain * tw * transmission(p.y) / (6.2832 * sigma * sigma);
+
+  // The brighter the sky (twilight, day), the fewer stars: faint ones go first.
+  float magnitude = -log(max(aStar.z, 1e-9)) / (0.4 * 0.62 * 2.302585);
+  float skyVis = smoothstep(uSkyMag + 1.5, uSkyMag, magnitude);
+  vColor = aColor * aStar.z * uGain * tw * skyVis * transmission(p.y) / (6.2832 * sigma * sigma);
 }
 `;
 
@@ -205,6 +228,7 @@ export const SKY_FRAG = /* glsl */ `
 ${SKY_COMMON}
 ${NOISE}
 ${RAY}
+${SUN_UNIFORMS}
 uniform float uMilkyWay;
 uniform float uTrail;
 uniform float uStyle;
@@ -259,7 +283,26 @@ void main() {
     }
     mw /= wsum; core /= wsum;
     vec3 tint = mix(vec3(0.78, 0.84, 1.0), vec3(1.0, 0.9, 0.78), core);
-    col += tint * mw * 0.018 * uMilkyWay * transmission(d.y);
+    col += tint * mw * 0.018 * uMilkyWay * uNight * transmission(d.y);
+  }
+
+  // Twilight and day, from the real sun. Colours are chosen so that, after
+  // the camera's exposure and tone curve, day reads as a clear blue and dusk
+  // as a deep blue sky with a warm band where the sun went down.
+  if (uTwi + uDay > 0.001) {
+    float toward = towardSun(d);
+    float hor = exp(-up / 0.10);
+    vec3 twi = mix(vec3(0.010, 0.017, 0.045), vec3(0.030, 0.040, 0.075), exp(-up / 0.35));
+    // The afterglow: a warm band along the whole horizon, strongest on the
+    // sun's side even when that side is out of frame.
+    twi += vec3(0.17, 0.075, 0.024) * hor * (0.3 + 0.7 * toward);
+    twi += vec3(0.05, 0.03, 0.022) * exp(-up / 0.3) * (0.4 + 0.6 * toward);
+    twi += vec3(0.04, 0.024, 0.034) * exp(-up / 0.22) * (1.0 - toward) * 0.5; // Belt of Venus
+    vec3 daySky = mix(vec3(0.090, 0.122, 0.170), vec3(0.015, 0.040, 0.130), pow(up, 0.45));
+    daySky += vec3(0.10, 0.085, 0.06) * pow(max(dot(d, uSunDir), 0.0), 12.0)
+            + vec3(0.03, 0.028, 0.022) * hor * toward;
+    col = mix(col, twi, uTwi);
+    col = mix(col, daySky, uDay);
   }
   gl_FragColor = vec4(col, 1.0);
 }
@@ -278,7 +321,17 @@ uniform vec3 uCloud;    // low, mid, high deck coverage, 0..1
 uniform vec4 uWind;     // xy: low/mid drift (km), zw: high drift (km)
 uniform vec2 uWindDir;  // unit vector the wind blows toward (x east, y south)
 uniform float uHaze, uFog, uFlash, uTime;
+${SUN_UNIFORMS}
 varying vec2 vUv;
+
+// Night colour → dusk (pink-orange undersides toward the sun) → day (white
+// tops, grey where thick).
+vec3 lightCloud(vec3 night, float n, float thick, float toward) {
+  vec3 twi = vec3(0.020, 0.020, 0.030) * (0.5 + 0.7 * n)
+           + vec3(0.13, 0.055, 0.03) * toward * (0.6 + 0.6 * n) * (1.0 - 0.5 * thick);
+  vec3 day = mix(vec3(0.16, 0.165, 0.175), vec3(0.075, 0.08, 0.088), thick) * (0.6 + 0.7 * n);
+  return mix(mix(night, twi, uTwi), day, uDay);
+}
 
 // Coverage c turns noise into cloud: more cover, lower threshold.
 float cover(float n, float c) {
@@ -302,7 +355,9 @@ void main() {
   float hazeA = uHaze * 0.32 * exp(-up / 0.08);
   float fogA = uFog * (0.78 + 0.22 * exp(-up / 0.14)); // ~1 km visibility hides nearly every star
   float veil = 1.0 - (1.0 - hazeA) * (1.0 - fogA);
+  float toward = towardSun(d);
   vec3 veilCol = vec3(0.010, 0.0115, 0.0140) + under * 0.8 + flash * 0.25;
+  veilCol = mix(mix(veilCol, vec3(0.035, 0.032, 0.042) + vec3(0.06, 0.03, 0.015) * toward, uTwi), vec3(0.11, 0.12, 0.13), uDay);
   acc += T * veil * veilCol; T *= 1.0 - veil;
 
   if (d.y > 0.0 && (uCloud.x + uCloud.y + uCloud.z) > 0.0) {
@@ -316,6 +371,7 @@ void main() {
     float aL = mix(cover(nL, uCloud.x), uCloud.x, smoothstep(10.0, 50.0, distL)) * 0.97;
     vec3 cL = vec3(0.0052, 0.0057, 0.0068) * (0.55 + 0.7 * nL) + under * (0.3 + 2.4 * lowSky) * (0.6 + nL)
             + flash * (0.4 + nL);
+    cL = lightCloud(cL, nL, 1.0, toward);
     acc += T * aL * cL; T *= 1.0 - aL;
 
     // Middle deck: altocumulus, smaller puffs, a little thinner.
@@ -324,6 +380,7 @@ void main() {
     float nM = fbm(vec3(pM * 0.42, uTime * 0.003 + 5.0));
     float aM = mix(cover(nM, uCloud.y), uCloud.y, smoothstep(25.0, 130.0, distM)) * 0.85;
     vec3 cM = vec3(0.0050, 0.0055, 0.0068) * (0.6 + 0.6 * nM) + under * (0.3 + 1.2 * lowSky) + flash * 0.6 * nM;
+    cM = lightCloud(cM, nM, 0.6, toward);
     acc += T * aM * cM; T *= 1.0 - aM;
 
     // High deck: cirrus, combed out along the wind and thin enough that
@@ -334,6 +391,7 @@ void main() {
     float nH = fbm(vec3(along.x * 0.03, along.y * 0.16, 2.0));
     float aH = mix(cover(nH, uCloud.z), uCloud.z * 0.6, smoothstep(40.0, 220.0, distH)) * 0.5;
     vec3 cH = vec3(0.0062, 0.0072, 0.0098) * (0.7 + 0.5 * nH) + under * 0.25 + flash * 0.3;
+    cH = lightCloud(cH, nH, 0.1, toward);
     acc += T * aH * cH; T *= 1.0 - aH;
   }
   gl_FragColor = vec4(acc, 1.0 - T);
@@ -402,6 +460,7 @@ uniform float uSnow;     // 0..1
 uniform float uFlash;    // lightning, 0..1
 uniform float uTime;     // real seconds
 uniform float uWindX;    // across-screen wind, -1..1 (slants rain, drifts snow)
+uniform float uDay, uTwi;
 varying vec2 vUv;
 
 // Rain: streaks in a scrolling grid of cells, one possible drop per cell.
@@ -490,30 +549,40 @@ void main() {
     vec3 near = base * 0.12 * (1.0 + 0.9 * exp(-(hn - alt) / 0.012))
               * (0.6 + 0.8 * fbm(vec3(az * 12.0, alt * 12.0, 5.0)));
     // Fog swallows the far ridges first; lightning lights the land for an instant.
-    vec3 fogCol = vec3(0.010, 0.011, 0.013);
+    vec3 fogCol = mix(vec3(0.010, 0.011, 0.013), vec3(0.11, 0.12, 0.13), uDay);
+    // By day the ridges show their depth: pale blue-grey far away, darker in
+    // front. At dusk they stay silhouettes against the glow.
+    // Daylight shows the texture, so it runs in gentle horizontal strata;
+    // round blobs in a thin band of ridge read as vertical wisps (like rain).
+    float strata = 0.93 + 0.14 * fbm(vec3(az * 6.0, alt * 70.0, 9.0));
+    far = mix(far, vec3(0.040, 0.052, 0.068) * strata, uDay);
+    mid = mix(mid, vec3(0.012, 0.017, 0.016) * strata, uDay);
+    near = mix(near, vec3(0.0045, 0.0062, 0.0040) * (0.6 + 0.8 * fbm(vec3(az * 12.0, alt * 12.0, 5.0))), uDay);
     far = mix(far, fogCol, uFog * 0.92) + uFlash * vec3(0.0030, 0.0033, 0.0042);
     mid = mix(mid, fogCol * 0.85, uFog * 0.75) + uFlash * vec3(0.0018, 0.002, 0.0025);
     near = mix(near, fogCol * 0.6, uFog * 0.45) + uFlash * vec3(0.0009);
     col = mix(col, far, mf * uForeground);
     col = mix(col, mid, mm * uForeground);
     col = mix(col, near, mn * uForeground);
-    bloom *= 1.0 - 0.85 * mf * uForeground;
+    bloom *= 1.0 - 0.97 * mf * uForeground;
   }
 
-  col += bloom * uBloom;
+  // Bloom is the stars' lens glow; a bright twilight or day sky would wash
+  // it across everything, so it fades as the sky brightens.
+  col += bloom * uBloom * (1.0 - 0.85 * max(uDay, uTwi * 0.8));
 
   // Precipitation is nearest of all, in front of the hills.
   if (uRain > 0.001) {
     float r = rainLayer(uv, 26.0, 9.0, 1.0, uRain * 0.5) * 1.0
             + rainLayer(uv, 44.0, 7.0, 7.0, uRain * 0.6) * 0.6
             + rainLayer(uv, 70.0, 5.5, 13.0, uRain * 0.7) * 0.35;
-    col += r * (vec3(0.010, 0.011, 0.013) + uFlash * vec3(0.012, 0.013, 0.016));
+    col += r * (mix(vec3(0.010, 0.011, 0.013), vec3(0.05, 0.052, 0.056), uDay) + uFlash * vec3(0.012, 0.013, 0.016));
   }
   if (uSnow > 0.001) {
     float s = snowLayer(uv, 14.0, 0.35, 3.0, uSnow * 0.45) * 1.0
             + snowLayer(uv, 26.0, 0.25, 9.0, uSnow * 0.55) * 0.6
             + snowLayer(uv, 44.0, 0.18, 17.0, uSnow * 0.6) * 0.35;
-    col += s * vec3(0.016, 0.017, 0.019);
+    col += s * mix(vec3(0.016, 0.017, 0.019), vec3(0.14, 0.145, 0.15), uDay);
   }
   col += uFlash * vec3(0.0012, 0.0013, 0.0017);
   col *= uExposure;

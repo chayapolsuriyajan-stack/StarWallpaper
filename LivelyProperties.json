@@ -144,6 +144,17 @@
     "step": 5,
     "value": 100
   },
+  "dayNight": {
+    "type": "dropdown",
+    "text": "Day and night",
+    "help": "Real: the sky follows the real sun where you are (sunset, blue hour, daylight). Darker days: stops at the blue hour. Always night: never changes.",
+    "value": 0,
+    "items": [
+      "Real day and night",
+      "Darker days (stop at the blue hour)",
+      "Always night"
+    ]
+  },
   "weather": {
     "type": "checkbox",
     "text": "Real weather (clouds, fog, rain, snow where you are)",

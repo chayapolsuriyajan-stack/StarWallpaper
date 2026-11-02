@@ -31,6 +31,7 @@ export function connectLively(engine) {
       case 'fpsCap': engine.setFps([30, 60, 120, 144, Infinity][n] ?? 30); break;
       case 'renderScale': engine.setRenderScale(n / 100); break;
       case 'restart': engine.restart(); break;
+      case 'dayNight': engine.setDayMode(n); break;
       case 'weather': engine.setWeather(bool(val)); break;
       case 'weatherLocation': engine.setWeatherMode(n); break;
       case 'weatherCity': engine.setWeatherCity(val); break;

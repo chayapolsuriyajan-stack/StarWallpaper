@@ -58,7 +58,7 @@ export class Constellations {
   update(dt, camera, lstRad, latRad) {
     const target = this.visible ? 1 : 0;
     this.fade += Math.sign(target - this.fade) * Math.min(Math.abs(target - this.fade), dt / 1.5);
-    this.uniforms.uOpacity.value = this.opacity * this.fade * this.fade * (3 - 2 * this.fade);
+    this.uniforms.uOpacity.value = this.opacity * this.fade * this.fade * (3 - 2 * this.fade) * (this.dayFade ?? 1);
     this.lines.visible = this.fade > 0;
     this.drawLabels(camera, lstRad, latRad);
   }

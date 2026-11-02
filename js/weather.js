@@ -3,16 +3,17 @@
  * conditions from Open-Meteo (free, no key), and turns them into the few
  * numbers the shaders need. Nothing here touches the DOM.
  *
- * Location: automatic from your IP address, unless the address looks like a
- * VPN or proxy (a provider flag, or an IP timezone that disagrees with this
- * PC's clock) — then the city typed in settings is used instead. With no
- * usable location the sky simply stays clear.
+ * Location comes from location.js (IP lookup, or your typed city on a VPN).
+ * It is resolved even with weather switched off, because the sun needs it.
+ * With no usable location the sky simply stays clear.
  */
+import { fetchJson, resolveLocation } from './location.js';
 
 const WEATHER_MS = 15 * 60 * 1000;   // conditions refresh
 const LOCATION_MS = 60 * 60 * 1000;  // re-check location (VPNs come and go)
 const STALE_MS = 3 * 60 * 60 * 1000; // after this without data, fade to clear
 const CACHE_KEY = 'star-trails-weather-v1';
+const MIN_PRECIP_MM = 0.2;           // less than this is a trace: no streaks
 
 /** The scene's weather parameters. All 0..1 unless noted. */
 export const CLEAR = Object.freeze({
@@ -25,47 +26,6 @@ export const CLEAR = Object.freeze({
   windDir: 0,       // degrees the wind comes FROM (meteorological)
 });
 
-const fetchJson = async (url, ms = 8000) => {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), ms);
-  try {
-    const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
-    if (!r.ok) throw new Error(`${r.status} ${url}`);
-    return await r.json();
-  } finally {
-    clearTimeout(t);
-  }
-};
-
-/** Current UTC offset of an IANA timezone, in minutes. */
-function tzOffset(tz, at = new Date()) {
-  const asUtc = (zone) => Date.parse(at.toLocaleString('en-US', { timeZone: zone, hour12: false }));
-  return Math.round((asUtc(tz) - asUtc('UTC')) / 60000);
-}
-
-/** IP geolocation. ip-api.com has VPN/proxy flags but is http-only on its free tier; ipwho.is is https. */
-async function ipLocation() {
-  try {
-    const j = await fetchJson('http://ip-api.com/json/?fields=status,city,country,lat,lon,timezone,proxy,hosting');
-    if (j.status === 'success') {
-      return { lat: j.lat, lon: j.lon, name: `${j.city}, ${j.country}`, tzOffset: tzOffset(j.timezone), flagged: j.proxy || j.hosting };
-    }
-  } catch { /* blocked (mixed content) or offline: try the next provider */ }
-  try {
-    const j = await fetchJson('https://ipwho.is/?fields=success,city,country,latitude,longitude,timezone');
-    if (j.success) {
-      return { lat: j.latitude, lon: j.longitude, name: `${j.city}, ${j.country}`, tzOffset: Math.round(j.timezone.offset / 60), flagged: false };
-    }
-  } catch { /* fall through */ }
-  return null;
-}
-
-async function geocode(city) {
-  const j = await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?count=1&name=${encodeURIComponent(city)}`);
-  const r = j.results?.[0];
-  return r ? { lat: r.latitude, lon: r.longitude, name: `${r.name}, ${r.country}` } : null;
-}
-
 /** WMO weather code + Open-Meteo fields → scene parameters. */
 export function toScene(c) {
   const code = c.weather_code ?? 0;
@@ -74,13 +34,22 @@ export function toScene(c) {
   // Some models only report the total: put it in the middle layer.
   if (!low && !mid && !high && c.cloud_cover) mid = pct(c.cloud_cover);
 
+  // Rain or snow is only drawn when it's measurably falling: forecast models
+  // often report a drizzle code with a trace (0.1 mm), and drawing that as
+  // streaks made the sky look like it rained all the time.
   const mm = c.precipitation ?? 0;
-  const intensity = Math.min(1, 0.25 + Math.log10(1 + mm * 4) * 0.6); // 0.1 mm/h faint .. 5 mm/h heavy
-  const isRain = (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
+  const wetCode = (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
   const isSnow = (code >= 71 && code <= 77) || code === 85 || code === 86;
-  const precip = isRain || isSnow ? Math.max(intensity, code === 51 || code === 56 || code === 71 ? 0.25 : 0.45) : 0;
-  // It doesn't rain from a clear sky: make sure the low deck is there.
+  const measurable = mm >= MIN_PRECIP_MM;
+  // 0.2 mm faint, ~1 mm moderate, 5 mm and up heavy.
+  const precip = measurable && (wetCode || isSnow)
+    ? Math.min(1, 0.2 + 0.25 * Math.log2(mm / MIN_PRECIP_MM))
+    : 0;
+  const isRain = wetCode && !isSnow;
+  // It doesn't rain from a clear sky: make sure the low deck is there. A
+  // trace of drizzle still lowers and thickens it a little.
   if (precip) low = Math.max(low, 0.55 + 0.4 * precip);
+  else if (wetCode || isSnow) low = Math.max(low, 0.45);
 
   const vis = c.visibility ?? 20000;
   let fog = Math.pow(Math.min(Math.max(1 - (vis - 800) / 9200, 0), 1), 1.5);
@@ -88,7 +57,7 @@ export function toScene(c) {
 
   return {
     cloudLow: low, cloudMid: mid, cloudHigh: high,
-    haze: Math.min(Math.max(((c.relative_humidity_2m ?? 50) - 55) / 45, 0), 1),
+    haze: Math.min(1, Math.max(((c.relative_humidity_2m ?? 50) - 55) / 45, 0) + (wetCode && !precip ? 0.15 : 0)),
     fog,
     rain: isRain ? precip : 0,
     snow: isSnow ? precip : 0,
@@ -111,9 +80,13 @@ export const PRESETS = {
 };
 
 export class Weather {
-  /** onChange(params) is called with fresh scene parameters. */
-  constructor(onChange) {
+  /**
+   * onChange(params): fresh scene parameters. onLocation(loc): the resolved
+   * location (or null), which the sun uses too.
+   */
+  constructor(onChange, onLocation = () => {}) {
     this.onChange = onChange;
+    this.onLocation = onLocation;
     this.enabled = true;
     this.mode = 'auto';   // 'auto' | 'city'
     this.city = '';
@@ -138,25 +111,16 @@ export class Weather {
     this.debounce = setTimeout(() => this.refresh(), relocate ? 1500 : 0);
   }
 
-  async locate() {
-    if (this.mode === 'city') return this.city ? geocode(this.city) : null;
-    const ip = await ipLocation();
-    const sysOffset = -new Date().getTimezoneOffset();
-    const vpn = ip && (ip.flagged || Math.abs(ip.tzOffset - sysOffset) >= 60);
-    if (ip && !vpn) return ip;
-    // On a VPN (or with no answer), the IP says nothing true about where you are.
-    return this.city ? geocode(this.city) : null;
-  }
-
   async refresh() {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => this.refresh(), WEATHER_MS);
-    if (!this.enabled) { this.status = 'off'; this.onChange({ ...CLEAR }); return; }
     try {
-      if (!this.location || Date.now() - this.locatedAt > LOCATION_MS) {
-        this.location = await this.locate();
+      if (!this.locatedAt || Date.now() - this.locatedAt > LOCATION_MS) {
+        this.location = await resolveLocation({ mode: this.mode, city: this.city });
         this.locatedAt = Date.now();
+        this.onLocation(this.location);
       }
+      if (!this.enabled) { this.status = 'off'; this.onChange({ ...CLEAR }); return; }
       if (!this.location) {
         this.status = this.mode === 'city' ? 'no city set' : 'VPN or no IP location, and no city set';
         this.onChange({ ...CLEAR });
@@ -169,10 +133,10 @@ export class Weather {
       }));
       const params = toScene(j.current);
       this.updatedAt = Date.now();
-      this.status = `ok: ${this.location.name}, code ${j.current.weather_code}`;
+      this.status = `ok: ${this.location.name} via ${this.location.provider}, code ${j.current.weather_code}`;
       this.raw = j.current;
       this.onChange(params);
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: this.updatedAt, params })); } catch { /* ignore */ }
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: this.updatedAt, params, from: { name: this.location.name, provider: this.location.provider, vpn: this.location.vpn, code: j.current.weather_code, mm: j.current.precipitation } })); } catch { /* ignore */ }
     } catch (e) {
       // Offline or a service hiccup: keep the last sky, fade to clear once it's old.
       this.status = `error: ${e.message}`;

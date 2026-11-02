@@ -69,6 +69,12 @@ export class StarTrails {
       uGain: { value: 1 },
       uStyle: { value: 0 },
       uTime: { value: 0 },
+      // The real sun (see sun.js), shared with the sky, cloud and camera passes.
+      uSkyMag: { value: 20 },
+      uSunDir: { value: new THREE.Vector3(0, -1, 0) },
+      uDay: { value: 0 },
+      uTwi: { value: 0 },
+      uNight: { value: 1 },
     };
 
     this.trailMaterial = new THREE.ShaderMaterial({

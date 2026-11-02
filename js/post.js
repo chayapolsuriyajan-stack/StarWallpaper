@@ -39,6 +39,10 @@ export class Post {
       uStyle: skyUniforms.uStyle,
       uInvVP: { value: new THREE.Matrix4() },
       uMilkyWay: { value: 1 },
+      uSunDir: skyUniforms.uSunDir,
+      uDay: skyUniforms.uDay,
+      uTwi: skyUniforms.uTwi,
+      uNight: skyUniforms.uNight,
     };
     this.skyPass = pass(SKY_FRAG, this.skyUniforms);
 
@@ -53,6 +57,10 @@ export class Post {
       uFog: { value: 0 },
       uFlash: { value: 0 },
       uTime: { value: 0 },
+      uSunDir: skyUniforms.uSunDir,
+      uDay: skyUniforms.uDay,
+      uTwi: skyUniforms.uTwi,
+      uNight: skyUniforms.uNight,
     };
     this.weatherPass = pass(WEATHER_FRAG, this.weatherUniforms);
     this.applyPass = pass(COPY_FRAG, { tSrc: { value: null } });
@@ -91,6 +99,8 @@ export class Post {
       uSnow: { value: 0 },
       uTime: { value: 0 },
       uWindX: { value: 0 },
+      uDay: skyUniforms.uDay,
+      uTwi: skyUniforms.uTwi,
     };
     this.compositePass = pass(COMPOSITE_FRAG, this.compositeUniforms);
     this.foregroundTarget = 1;

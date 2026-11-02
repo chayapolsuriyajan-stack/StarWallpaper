@@ -4,6 +4,7 @@ import { StarTrails } from './star-trails.js';
 import { Constellations } from './constellations.js';
 import { Post } from './post.js';
 import { Weather, CLEAR, PRESETS } from './weather.js';
+import { sunPosition, sunDirection, skyState } from './sun.js';
 
 // Trail and head brightness, tuned against the reference photo.
 const TRAIL_GAIN = 0.12;
@@ -66,7 +67,14 @@ export class Engine {
     this.wxPreview = null;       // a named preset overrides live data (explore.html?wx=)
     this.wind = { lx: 0, lz: 0, hx: 0, hz: 0 };
     this.flash = { next: 6, t: -1 };
-    this.weather = new Weather((p) => { this.wxTarget = { ...p }; });
+    // Location (shared with the sun) arrives with the first weather refresh.
+    this.location = null;
+    this.weather = new Weather((p) => { this.wxTarget = { ...p }; }, (loc) => { this.location = loc; });
+
+    // Real sunset and sunrise (see sun.js).
+    this.dayMode = 'real';       // 'real' | 'dark' (holds at the blue hour) | 'night'
+    this.sunPreview = null;      // { alt, az } overrides the real sun (explore.html?tod=)
+    this.prevSunAlt = null;
     // Lively configures it on load; start anyway if no settings ever arrive.
     setTimeout(() => { if (!this.weather.updatedAt && this.weather.status === 'idle') this.weather.refresh(); }, 2500);
 
@@ -165,9 +173,40 @@ export class Engine {
     this.stars.headUniforms.uGain.value = HEAD_GAIN_ALONE + (HEAD_GAIN_WITH_TRAILS - HEAD_GAIN_ALONE) * mix;
     this.stars.trailMesh.visible = mix > 0.001;
 
+    this.updateSun();
     this.updateWeather(dt);
     this.constellations.update(dt, this.camera, lst, u.uLat.value);
     this.post.render(this.scene, this.camera, dt, this.time);
+  }
+
+  /** The real sun, from the real clock at your location, drives day and night. */
+  updateSun() {
+    const u = this.stars.uniforms;
+    let alt, az;
+    if (this.sunPreview) ({ alt, az } = this.sunPreview);
+    else {
+      // Unknown location (on a VPN with no city): use the sky's own settings.
+      const lat = this.location?.lat ?? u.uLat.value / deg;
+      const lon = this.location?.lon ?? this.clock.longitude;
+      ({ alt, az } = sunPosition(new Date(), lat, lon));
+    }
+    if (this.dayMode === 'dark') alt = Math.min(alt, -7);   // never brighter than the blue hour
+    if (this.dayMode === 'night') alt = -30;
+    this.sunAlt = alt;
+
+    const st = skyState(alt);
+    u.uDay.value = st.day;
+    u.uTwi.value = st.twilight;
+    u.uNight.value = Math.min(1, Math.max(0, (-12 - alt) / 6));
+    u.uSkyMag.value = st.magLimit;
+    u.uSunDir.value.set(...sunDirection(alt, az));
+    // Constellation lines would look odd painted on a daylight sky.
+    this.constellations.dayFade = 1 - Math.max(st.day, st.twilight * 0.6);
+
+    // Nightfall opens the shutter: the trails build up through each night,
+    // like a real all-night exposure.
+    if (this.prevSunAlt != null && this.prevSunAlt >= -12 && alt < -12 && this.buildup) this.clock.openShutter();
+    this.prevSunAlt = alt;
   }
 
   updateWeather(dt) {
@@ -225,6 +264,11 @@ export class Engine {
   setWeatherMode(i) { this.weather.configure({ mode: i === 1 ? 'city' : 'auto' }); }
   setWeatherCity(city) { this.weather.configure({ city: String(city ?? '') }); }
   setWeatherIntensity(v) { this.wxIntensity = v; }
+  setDayMode(i) { this.dayMode = ['real', 'dark', 'night'][i] ?? 'real'; }
+  /** Show the sun at a given altitude/azimuth instead of the real one (null returns to real). */
+  previewSun(alt, az = 250) {
+    this.sunPreview = alt == null ? null : { alt, az };
+  }
   /** Show a named condition instead of live data (null returns to live). */
   previewWeather(name) {
     this.wxPreview = name ? { ...(PRESETS[name] ?? CLEAR) } : null;

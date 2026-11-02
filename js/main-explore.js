@@ -59,5 +59,9 @@ addEventListener('keydown', (e) => { if (e.key === 'h' || e.key === 'H') panel.c
 // a condition instead of the live weather.
 const wx = params.get('wx');
 if (wx) engine.previewWeather(wx);
+// ?tod=-4 shows the sun at that altitude (degrees) instead of the real one;
+// &sunaz= sets its bearing (default 250, west-southwest: an evening sky).
+const tod = params.get('tod');
+if (tod != null) engine.previewSun(Number(tod), Number(params.get('sunaz') ?? 250));
 
 window.engine = engine;
