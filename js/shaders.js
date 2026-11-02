@@ -13,7 +13,10 @@ float towardSun(vec3 d) {
   vec2 s = uSunDir.xz, v = d.xz;
   float ls = length(s), lv = length(v);
   if (ls < 1e-4 || lv < 1e-4) return 0.5;
-  return pow(0.5 + 0.5 * dot(s / ls, v / lv), 1.6);
+  // Clamped: looking straight away from the sun, rounding can make the dot
+  // product -1.0000001, and pow() of a value below zero is NaN, which the
+  // bloom pass then smears into flickering black blocks.
+  return pow(clamp(0.5 + 0.5 * dot(s / ls, v / lv), 0.0, 1.0), 1.6);
 }
 `;
 
@@ -262,7 +265,7 @@ void main() {
   col += vec3(0.010, 0.013, 0.019) * exp(-up / 0.35);
   col += vec3(0.012, 0.014, 0.017) * exp(-up / 0.07);
   // Faint sodium glow from a distant town, off to the north-east.
-  col += vec3(0.010, 0.007, 0.004) * exp(-up / 0.06) * exp(-pow((az - 0.7) / 0.5, 2.0));
+  col += vec3(0.010, 0.007, 0.004) * exp(-up / 0.06) * exp(-((az - 0.7) / 0.5) * ((az - 0.7) / 0.5)); // squared directly: pow() is undefined below zero
 
   if (uMilkyWay > 0.001) {
     // Back to equatorial: horizontal (S, W, Up) → hour-angle frame.
@@ -344,7 +347,7 @@ void main() {
   float up = max(d.y, 0.0);
   float az = atan(d.x, -d.z); // real-world bearing, like the sky's town glow
   // The town glow lights cloud bases from below, strongest low in the NE.
-  float town = exp(-pow((az - 0.7) / 0.6, 2.0));
+  float town = exp(-((az - 0.7) / 0.6) * ((az - 0.7) / 0.6));
   vec3 under = vec3(0.0075, 0.0052, 0.0034) * town;
   vec3 flash = uFlash * vec3(0.026, 0.029, 0.037); // a glow inside the cloud, not a camera flash
 
